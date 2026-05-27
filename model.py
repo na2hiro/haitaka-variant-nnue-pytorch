@@ -210,36 +210,29 @@ class NNUE(pl.LightningModule):
     if self.feature_set.name == new_feature_set.name:
       return
 
-    # TODO: Implement this for more complicated conversions.
-    #       Currently we support only a single feature block.
-    if len(self.feature_set.features) > 1:
+    if self.feature_set.num_real_features != new_feature_set.num_real_features:
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
-    # Currently we only support conversion for feature sets with
-    # one feature block each so we'll dig the feature blocks directly
-    # and forget about the set.
-    old_feature_block = self.feature_set.features[0]
-    new_feature_block = new_feature_set.features[0]
-
-    # next(iter(new_feature_block.factors)) is the way to get the
-    # first item in an OrderedDict. (the ordered dict being str : int
-    # mapping of the factor name to its size).
-    # It is our new_feature_factor_name.
-    # For example old_feature_block.name == "HalfKP"
-    # and new_feature_factor_name == "HalfKP^"
-    # We assume here that the "^" denotes factorized feature block
-    # and we would like feature block implementers to follow this convention.
-    # So if our current feature_set matches the first factor in the new_feature_set
-    # we only have to add the virtual feature on top of the already existing real ones.
-    if old_feature_block.name == next(iter(new_feature_block.factors)):
-      # We can just extend with zeros since it's unfactorized -> factorized
-      weights = self.input.weight
-      padding = weights.new_zeros((new_feature_block.num_virtual_features, weights.shape[1]))
-      weights = torch.cat([weights, padding], dim=0)
-      self.input.weight = nn.Parameter(weights)
-      self.feature_set = new_feature_set
-    else:
+    old_real = self.feature_set.get_real_feature_ranges()
+    new_real = new_feature_set.get_real_feature_ranges()
+    if len(old_real) > len(new_real):
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+
+    for (old_start, old_end), (new_start, new_end) in zip(old_real, new_real):
+      if (old_end - old_start) != (new_end - new_start):
+        raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+
+    weights = self.input.weight
+    bias = self.input.bias
+    new_weights = weights.new_zeros((new_feature_set.num_features, weights.shape[1]))
+    for (old_start, old_end), (new_start, new_end) in zip(old_real, new_real):
+      new_weights[new_start:new_end, :] = weights[old_start:old_end, :]
+
+    self.input = DoubleFeatureTransformerSlice(new_feature_set.num_features, L1 + self.num_psqt_buckets)
+    self.input.weight = nn.Parameter(new_weights)
+    self.input.bias = nn.Parameter(bias.detach().clone())
+    self.feature_set = new_feature_set
+    self._init_layers()
 
   def forward(self, us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices):
     wp, bp = self.input(white_indices, white_values, black_indices, black_values)

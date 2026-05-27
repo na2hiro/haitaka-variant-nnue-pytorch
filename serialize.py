@@ -169,13 +169,19 @@ class NNUEReader():
   def read_feature_transformer(self, layer, num_psqt_buckets):
     bias = self.tensor(numpy.int16, [layer.bias.shape[0]-num_psqt_buckets]).divide(127.0)
     layer.bias.data = torch.cat([bias, torch.tensor([0]*num_psqt_buckets)])
-    # weights stored as [41024][256], so we need to transpose the pytorch [256][41024]
     shape = layer.weight.shape
-    weights = self.tensor(numpy.int16, [shape[0], shape[1]-num_psqt_buckets])
-    psqtweights = self.tensor(numpy.int32, [shape[0], num_psqt_buckets])
-    weights = weights.divide(127.0)
-    psqtweights = psqtweights.divide(9600.0)
-    layer.weight.data = torch.cat([weights, psqtweights], dim=1)
+    real_shape = (self.feature_set.num_real_features, shape[1] - num_psqt_buckets)
+    real_weights = self.tensor(numpy.int16, real_shape).divide(127.0)
+    real_psqtweights = self.tensor(numpy.int32, [self.feature_set.num_real_features, num_psqt_buckets]).divide(9600.0)
+    full_weights = torch.zeros(shape[0], shape[1] - num_psqt_buckets, dtype=torch.float32)
+    full_psqtweights = torch.zeros(shape[0], num_psqt_buckets, dtype=torch.float32)
+    cursor = 0
+    for start, end in self.feature_set.get_real_feature_ranges():
+      count = end - start
+      full_weights[start:end, :] = real_weights[cursor:cursor + count, :]
+      full_psqtweights[start:end, :] = real_psqtweights[cursor:cursor + count, :]
+      cursor += count
+    layer.weight.data = torch.cat([full_weights, full_psqtweights], dim=1)
 
   def read_fc_layer(self, layer, is_output=False):
     # FC layers are stored as int8 weights, and int32 biases
