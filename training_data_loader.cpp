@@ -96,9 +96,9 @@ static Piece friendly_piece_at(const Position& pos, Color color, Square sq) {
 
 static Square single_donor_square(Color color, Square sq) {
 #if HAITAKA_DONOR_MODE == 1
-    return color == Color::White ? offset_square(sq, 0, 1) : offset_square(sq, 0, -1);
-#elif HAITAKA_DONOR_MODE == 2
     return color == Color::White ? offset_square(sq, 0, -1) : offset_square(sq, 0, 1);
+#elif HAITAKA_DONOR_MODE == 2
+    return color == Color::White ? offset_square(sq, 0, 1) : offset_square(sq, 0, -1);
 #else
     return Square::NB;
 #endif
@@ -120,6 +120,134 @@ static std::array<Square, DONOR_KNIGHT8_SLOTS> knight8_donor_squares(Color color
         offset_square_from_relative(color, sq, 2, 1),
     };
 }
+
+struct HalfKP {
+    static constexpr int NUM_SQ = static_cast<int>(Square::NB);
+    static constexpr int NUM_PT = static_cast<int>(PieceType::MaxPiece) * 2;
+    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT + 1;
+    static constexpr int INPUTS = NUM_PLANES * NUM_SQ;
+    static constexpr int MAX_ACTIVE_FEATURES = MAX_PIECES;
+
+    static int feature_index(Color color, Square ksq, Square sq, Piece p) {
+        auto p_idx = static_cast<int>(type_of(p)) * 2 + (color_of(p) != color);
+        return 1 + static_cast<int>(orient(color, sq)) + p_idx * NUM_SQ
+            + map_king(ksq) * NUM_PLANES;
+    }
+
+    static std::pair<int, int> fill_features_sparse(
+        const TrainingDataEntry& e, int* features, float* values, Color color
+    ) {
+        auto& pos = e.pos;
+        auto ksq = pos.kingSquare(color);
+
+        int j = 0;
+        for (Square sq = Square::MIN; sq <= Square::MAX; ++sq) {
+            const auto p = pos.pieceAt(sq);
+            if (p == Piece::None || type_of(p) == PieceType::King) {
+                continue;
+            }
+            values[j] = 1.0f;
+            features[j] = feature_index(color, orient(color, ksq), sq, p);
+            ++j;
+        }
+
+        return {j, INPUTS};
+    }
+};
+
+struct HalfKPFactorized {
+    static constexpr int K_INPUTS = HalfKP::NUM_SQ;
+    static constexpr int PIECE_INPUTS = HalfKP::NUM_SQ * HalfKP::NUM_PT;
+    static constexpr int INPUTS = HalfKP::INPUTS + K_INPUTS + PIECE_INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = HalfKP::MAX_ACTIVE_FEATURES + 1 + MAX_PIECES;
+
+    static std::pair<int, int> fill_features_sparse(
+        const TrainingDataEntry& e, int* features, float* values, Color color
+    ) {
+        const auto [start_j, offset] = HalfKP::fill_features_sparse(e, features, values, color);
+        auto& pos = e.pos;
+
+        int j = start_j;
+        const auto ksq = pos.kingSquare(color);
+        features[j] = offset + static_cast<int>(orient(color, ksq));
+        values[j] = static_cast<float>(start_j);
+        ++j;
+
+        for (Square sq = Square::MIN; sq <= Square::MAX; ++sq) {
+            const auto p = pos.pieceAt(sq);
+            if (p == Piece::None || type_of(p) == PieceType::King) {
+                continue;
+            }
+            const auto p_idx = static_cast<int>(type_of(p)) * 2 + (color_of(p) != color);
+            values[j] = 1.0f;
+            features[j] = offset + K_INPUTS + (p_idx * HalfKP::NUM_SQ) + static_cast<int>(orient(color, sq));
+            ++j;
+        }
+
+        return {j, INPUTS};
+    }
+};
+
+struct HalfKA {
+    static constexpr int NUM_SQ = static_cast<int>(Square::NB);
+    static constexpr int NUM_PT = (static_cast<int>(PieceType::MaxPiece) + 1) * 2;
+    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT + 1;
+    static constexpr int INPUTS = NUM_PLANES * NUM_SQ;
+    static constexpr int MAX_ACTIVE_FEATURES = MAX_PIECES;
+
+    static int feature_index(Color color, Square ksq, Square sq, Piece p) {
+        auto p_idx = static_cast<int>(type_of(p)) * 2 + (color_of(p) != color);
+        return 1 + static_cast<int>(orient_flip(color, sq)) + p_idx * NUM_SQ
+            + map_king(ksq) * NUM_PLANES;
+    }
+
+    static std::pair<int, int> fill_features_sparse(
+        const TrainingDataEntry& e, int* features, float* values, Color color
+    ) {
+        auto& pos = e.pos;
+        auto ksq = pos.kingSquare(color);
+
+        int j = 0;
+        for (Square sq = Square::MIN; sq <= Square::MAX; ++sq) {
+            const auto p = pos.pieceAt(sq);
+            if (p == Piece::None) {
+                continue;
+            }
+            values[j] = 1.0f;
+            features[j] = feature_index(color, orient_flip(color, ksq), sq, p);
+            ++j;
+        }
+
+        return {j, INPUTS};
+    }
+};
+
+struct HalfKAFactorized {
+    static constexpr int PIECE_INPUTS = HalfKA::NUM_SQ * HalfKA::NUM_PT;
+    static constexpr int INPUTS = HalfKA::INPUTS + PIECE_INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = HalfKA::MAX_ACTIVE_FEATURES + MAX_PIECES;
+
+    static std::pair<int, int> fill_features_sparse(
+        const TrainingDataEntry& e, int* features, float* values, Color color
+    ) {
+        const auto [start_j, offset] = HalfKA::fill_features_sparse(e, features, values, color);
+        auto& pos = e.pos;
+
+        int j = start_j;
+        for (Square sq = Square::MIN; sq <= Square::MAX; ++sq) {
+            const auto p = pos.pieceAt(sq);
+            if (p == Piece::None) {
+                continue;
+            }
+            const auto p_idx = static_cast<int>(type_of(p)) * 2 + (color_of(p) != color);
+            values[j] = 1.0f;
+            features[j] = offset + (p_idx * HalfKA::NUM_SQ) + static_cast<int>(orient_flip(color, sq));
+            ++j;
+        }
+
+        return {j, INPUTS};
+    }
+};
 
 struct HalfKAv2 {
     static constexpr int NUM_KSQ = static_cast<int>(Square::KNB);
@@ -577,6 +705,26 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(
     auto skipPredicate = make_skip_predicate(filtered, random_fen_skipping);
     std::string_view feature_set(feature_set_c);
 
+    if (feature_set == "HalfKP") {
+        return new FeaturedBatchStream<FeatureSet<HalfKP>, SparseBatch>(
+            concurrency, filename, batch_size, cyclic, skipPredicate
+        );
+    }
+    if (feature_set == "HalfKP^") {
+        return new FeaturedBatchStream<FeatureSet<HalfKPFactorized>, SparseBatch>(
+            concurrency, filename, batch_size, cyclic, skipPredicate
+        );
+    }
+    if (feature_set == "HalfKA") {
+        return new FeaturedBatchStream<FeatureSet<HalfKA>, SparseBatch>(
+            concurrency, filename, batch_size, cyclic, skipPredicate
+        );
+    }
+    if (feature_set == "HalfKA^") {
+        return new FeaturedBatchStream<FeatureSet<HalfKAFactorized>, SparseBatch>(
+            concurrency, filename, batch_size, cyclic, skipPredicate
+        );
+    }
     if (feature_set == "HalfKAv2") {
         return new FeaturedBatchStream<FeatureSet<HalfKAv2>, SparseBatch>(
             concurrency, filename, batch_size, cyclic, skipPredicate
