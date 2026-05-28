@@ -214,16 +214,27 @@ class NNUE(pl.LightningModule):
     new_real = new_feature_set.get_real_feature_ranges()
     if len(old_real) > len(new_real):
       raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+    if len(self.feature_set.features) > len(new_feature_set.features):
+      raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
     for (old_start, old_end), (new_start, new_end) in zip(old_real, new_real):
       if (old_end - old_start) != (new_end - new_start):
+        raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+    for old_feature, new_feature in zip(self.feature_set.features, new_feature_set.features):
+      if old_feature.name != new_feature.name or old_feature.num_features != new_feature.num_features:
         raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
 
     weights = self.input.weight
     bias = self.input.bias
     new_weights = weights.new_zeros((new_feature_set.num_features, weights.shape[1]))
-    for (old_start, old_end), (new_start, new_end) in zip(old_real, new_real):
-      new_weights[new_start:new_end, :] = weights[old_start:old_end, :]
+    old_offset = 0
+    new_offset = 0
+    for old_feature, new_feature in zip(self.feature_set.features, new_feature_set.features):
+      old_end = old_offset + old_feature.num_features
+      new_end = new_offset + new_feature.num_features
+      new_weights[new_offset:new_end, :] = weights[old_offset:old_end, :]
+      old_offset = old_end
+      new_offset = new_end
 
     self.input = DoubleFeatureTransformerSlice(new_feature_set.num_features, L1 + self.num_psqt_buckets)
     self.input.weight = nn.Parameter(new_weights)
