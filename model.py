@@ -220,27 +220,30 @@ class NNUE(pl.LightningModule):
     for (old_start, old_end), (new_start, new_end) in zip(old_real, new_real):
       if (old_end - old_start) != (new_end - new_start):
         raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
-    for old_feature, new_feature in zip(self.feature_set.features, new_feature_set.features):
-      if old_feature.name != new_feature.name or old_feature.num_features != new_feature.num_features:
+    copy_ranges = []
+    old_offset = 0
+    new_offset = 0
+    for old_feature, new_feature, (old_start, old_end), (new_start, new_end) in zip(self.feature_set.features, new_feature_set.features, old_real, new_real):
+      if old_feature.name == new_feature.name and old_feature.num_features == new_feature.num_features:
+        copy_ranges.append((old_offset, old_offset + old_feature.num_features, new_offset))
+      elif (old_end - old_start) == (new_end - new_start):
+        copy_ranges.append((old_start, old_end, new_start))
+      else:
         raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
+      old_offset += old_feature.num_features
+      new_offset += new_feature.num_features
 
     weights = self.input.weight
     bias = self.input.bias
-    new_weights = weights.new_zeros((new_feature_set.num_features, weights.shape[1]))
-    old_offset = 0
-    new_offset = 0
-    for old_feature, new_feature in zip(self.feature_set.features, new_feature_set.features):
-      old_end = old_offset + old_feature.num_features
-      new_end = new_offset + new_feature.num_features
-      new_weights[new_offset:new_end, :] = weights[old_offset:old_end, :]
-      old_offset = old_end
-      new_offset = new_end
 
     self.input = DoubleFeatureTransformerSlice(new_feature_set.num_features, L1 + self.num_psqt_buckets)
-    self.input.weight = nn.Parameter(new_weights)
     self.input.bias = nn.Parameter(bias.detach().clone())
     self.feature_set = new_feature_set
     self._init_layers()
+    new_weights = self.input.weight.detach().clone()
+    for old_start, old_end, new_start in copy_ranges:
+      new_weights[new_start:new_start + old_end - old_start, :] = weights[old_start:old_end, :]
+    self.input.weight = nn.Parameter(new_weights)
 
   def forward(self, us, them, white_indices, white_values, black_indices, black_values, psqt_indices, layer_stack_indices):
     wp, bp = self.input(white_indices, white_values, black_indices, black_values)
