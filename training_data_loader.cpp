@@ -629,9 +629,9 @@ struct FeaturedBatchStream : Stream<StorageT> {
         const int num_feature_threads =
             std::max(1, concurrency - std::max(1, concurrency / num_feature_threads_per_reading_thread));
 
+        m_num_workers.store(num_feature_threads);
         for (int i = 0; i < num_feature_threads; ++i) {
             m_workers.emplace_back(worker);
-            m_num_workers.fetch_add(1);
         }
     }
 
@@ -669,8 +669,8 @@ private:
     std::mutex m_stream_mutex;
     std::condition_variable m_batches_not_full;
     std::condition_variable m_batches_any;
-    std::atomic_bool m_stop_flag;
-    std::atomic_int m_num_workers;
+    std::atomic_bool m_stop_flag{false};
+    std::atomic_int m_num_workers{0};
     std::vector<std::thread> m_workers;
 };
 

@@ -210,9 +210,6 @@ class NNUE(pl.LightningModule):
     if self.feature_set.name == new_feature_set.name:
       return
 
-    if self.feature_set.num_real_features != new_feature_set.num_real_features:
-      raise Exception('Cannot change feature set from {} to {}.'.format(self.feature_set.name, new_feature_set.name))
-
     old_real = self.feature_set.get_real_feature_ranges()
     new_real = new_feature_set.get_real_feature_ranges()
     if len(old_real) > len(new_real):
