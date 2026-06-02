@@ -10,8 +10,8 @@ def _calculate_features_hash(features):
     if len(features) == 1:
         return features[0].hash
 
-    tail_hash = calculate_features_hash(features[1:])
-    return features[0].hash ^ (tail_hash << 1) ^ (tail_hash >> 1) & 0xffffffff
+    tail_hash = _calculate_features_hash(features[1:])
+    return (features[0].hash ^ (tail_hash << 1) ^ (tail_hash >> 1)) & 0xffffffff
 
 class FeatureSet:
     '''
@@ -68,16 +68,21 @@ class FeatureSet:
     to happen after concatenating many feature blocks.
     '''
     def get_active_features(self, board):
-        w = torch.zeros(0)
-        b = torch.zeros(0)
+        blocks = [feature.get_active_features(board) for feature in self.features]
+        if all(
+            w_local.ndim == 1 and w_local.numel() == feature.num_features
+            for feature, (w_local, _) in zip(self.features, blocks)
+        ):
+            w = torch.cat([w_local for (w_local, _) in blocks])
+            b = torch.cat([b_local for (_, b_local) in blocks])
+            return w, b
 
+        w = torch.zeros(0, dtype=torch.int64)
+        b = torch.zeros(0, dtype=torch.int64)
         offset = 0
-        for feature in self.features:
-            w_local, b_local = feature.get_active_features(board)
-            w_local += offset
-            b_local += offset
-            w = torch.cat([w, w_local])
-            b = torch.cat([b, b_local])
+        for feature, (w_local, b_local) in zip(self.features, blocks):
+            w = torch.cat([w, w_local.to(dtype=torch.int64) + offset])
+            b = torch.cat([b, b_local.to(dtype=torch.int64) + offset])
             offset += feature.num_features
 
         return w, b

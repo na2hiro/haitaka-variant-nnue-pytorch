@@ -66,8 +66,6 @@ def main():
     features.add_argparse_args(parser)
     args = parser.parse_args()
 
-    supported_features = ('HalfKAv2', 'HalfKAv2^')
-    assert args.features in supported_features
     feature_set = features.get_feature_set_from_name(args.features)
 
     from os.path import basename

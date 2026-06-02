@@ -57,6 +57,15 @@ The default is:
 python train.py ... --features="HalfKAv2^"
 ```
 
+Composite feature sets are also supported. Downstream overlays can append
+additional sparse real blocks to `HalfKAv2^`, for example:
+`HalfKAv2^+DonorSingleEff`, `HalfKAv2^+DonorPairSlots`,
+and `HalfKAv2^+DonorKnight8Slots`.
+
+Those donor blocks are intended for variant-specific overlays that provide
+compatible `variant.py`, `variant.h`, and `HAITAKA_DONOR_MODE` settings.
+They are expanded by the C++ data loader rather than by Python feature code.
+
 ## Skipping certain fens in the training
 
 `--smart-fen-skipping` currently skips over moves where the king is in check, or where the bestMove is a capture (typical of non-quiet positions).
@@ -87,6 +96,10 @@ Import an existing SF NNUE network to the pytorch network format.
 python serialize.py nn.nnue converted.pt
 ```
 
+When importing a composite network from `.nnue`, pass the exact feature-set
+string with `--features=...` so the reader can rebuild the full training
+geometry, including any appended donor blocks.
+
 # Visualize a network
 
 Visualize a network from either a checkpoint (`.ckpt`), a serialized model (`.pt`)
@@ -100,6 +113,9 @@ or a SF NNUE file (`.nnue`).
 ```
 python visualize.py nn.nnue  --features="HalfKAv2" --ref-model nn.cpkt --ref-features="HalfKAv2^"
 ```
+
+`visualize.py` only understands the built-in HalfKAv2 board layout. For
+composite donor feature sets, use `visualize_multi_hist.py` instead.
 
 # Logging
 
